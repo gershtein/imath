@@ -95,6 +95,10 @@
 #include "TCanvas.h"
 #endif
 
+//operation latencies for proper HDL pipelining
+#define MULT_LATENCY  1
+#define LUT_LATENCY   2
+
 class var_base {
   
  public:
@@ -193,8 +197,6 @@ class var_base {
 
   bool readytoanalyze_;
   bool readytoprint_;
-  static const int MULT_LATENCY = 1;
-  static const int LUT_LATENCY = 2;
 
   double minval_;
   double maxval_;
@@ -471,7 +473,7 @@ class var_nounits : public var_base {
 
  public:
  var_nounits(std::string name, var_base *p1, int ps = 17):
-  var_base(name,p1,0,var_base::MULT_LATENCY){
+  var_base(name,p1,0,MULT_LATENCY){
     op_ = "nounits";
     ps_ = ps;
     nbits_ = p1->get_nbits();
@@ -531,7 +533,7 @@ class var_timesC : public var_base {
 
  public:
  var_timesC(std::string name, var_base *p1, double cF, int ps = 17):
-  var_base(name,p1,0,var_base::MULT_LATENCY){
+  var_base(name,p1,0,MULT_LATENCY){
     op_ = "timesC";
     cF_ = cF;
     ps_ = ps;
@@ -564,7 +566,7 @@ class var_mult : public var_base {
   
  public:
  var_mult(std::string name, var_base *p1, var_base *p2, double range = -1, int nmax = 18):
-  var_base(name,p1,p2,var_base::MULT_LATENCY){
+  var_base(name,p1,p2,MULT_LATENCY){
     op_ = "mult";
     
     std::map<std::string,int> map1 = p1->get_Kmap();
@@ -614,7 +616,7 @@ class var_inv : public var_base {
   enum mode {pos, neg, both};
   
  var_inv(std::string name, var_base *p1, double offset, int nbits, int n, unsigned int shift, mode m, int nbaddr = -1):
-  var_base(name,p1,0,var_base::LUT_LATENCY){
+  var_base(name,p1,0,LUT_LATENCY){
     op_ = "inv";
     offset_ = offset;
     nbits_  = nbits;

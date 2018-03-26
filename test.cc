@@ -33,17 +33,21 @@ int main()
   
   static var_def  v1("v1","m",40, 0.02);
   static var_def  v2("v2","m",40, 0.02);
-  static var_def  v3("v3","",10,  0.125);
+  static var_def  v3("v3","",10,  1./(1<<15));
   static var_inv  v4("v4",&v1, 0, 18, 25, 0, var_inv::mode::both);
   static var_mult v5("v5",&v2,&v4);
+  // the analysis of v5 says the range by default is too large
+  // so one can put it in explicitely like this:
+  // static var_mult v5("v5",&v2,&v4, 3.);
   static var_add  v6("v6",&v3,&v5);
   static var_adjustK v7("v7",&v6,v6.get_K()/4.);
   
   
   for(int i=0; i<100000; ++i){
-    float fv1 = (rr.Rndm()-0.5)*82.;
-    float fv2 = (rr.Rndm()-0.5)*60.;
-    float fv3 = rr.Rndm()*9.5;
+    float fv1 = 10+rr.Rndm()*27.;
+    float fv2 = 20+10*rr.Rndm();
+    if(rr.Rndm()>0.5) fv2 = -fv2;
+    float fv3 = 6+rr.Rndm()*3.5;
     v1.set_fval(fv1);
     v2.set_fval(fv2);
     v3.set_fval(fv3);
