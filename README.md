@@ -74,7 +74,9 @@
                    epsilon is a comparison precision, nbits forces the bit length (possibly discarding MSBs)
 
 
-*bool calculate* (int debug_level) runs through the entire formula tree recalculating both ineteger and floating point values
+*bool calculate* (int debug_level):
+
+                     runs through the entire formula tree recalculating both ineteger and floating point values
 
                      returns true if everything is OK, false if obvious problems with the calculation exist, i.e
                                   -  integer value does not fit into the alotted number of bins
