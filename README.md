@@ -8,11 +8,11 @@
 
   *note* all integers are assumed to be signed
 
-  all variables have units, stored in a map <string,int>, with string a unit (i.e. "phi") and int the power
-                   "2" is always present in the map, and it's int pair is referred to as 'shift'
-                   units are properly combined / propagated through calculations
-                   adding/subtracting variables with different units throws an exception
-                   adding/subtracting variables with different shifts is allowed and is handled correctly
+  all variables have units, stored in a map <string,int>, with string a unit (i.e. "phi") and int the power.
+                   "2" is always present in the map, and it's int pair is referred to as 'shift'.
+                   units are properly combined / propagated through calculations.
+                   adding/subtracting variables with different units throws an exception.
+                   adding/subtracting variables with different shifts is allowed and is handled correctly.
 
 *calculate()* method re-calculates the variable double and int values based on its operands
                    returns false in case of overflows and/or mismatches between double and int calculations.
@@ -23,20 +23,20 @@
 *var_def*     (string name, string units, double fmax, double K):
 
                    define variable with bit value fval = K*ival, and maximum absolute value fmax.
-                   calculates nbins on its own
-                   one can assign value to it using set_ methods 
+                   calculates nbins on its own.
+                   one can assign value to it using set_ methods. 
 
  *var_add*      (string name, var_base *p1, var_base *p2, double range = -1, int nmax = 18):
  
  *var_subtract* (string name, var_base *p1, var_base *p2, double range = -1, int nmax = 18):
  
-                   add/subtract variables. Bit length increases by 1, but capped at nmax
-                   if range>0 specified, bit length is decreased to drop unnecessary high bits
+                   add/subtract variables. Bit length increases by 1, but capped at nmax.
+                   if range>0 specified, bit length is decreased to drop unnecessary high bits.
 
  *var_mult*    (string name, var_base *p1, var_base *p2, double range = -1, int nmax = 18):
  
-                   multiplication. Bit length is a sum of the lengths of the operads, but capped at nmax
-                   if range>0 specified, bit length is decreased to drop unnecessary high bits or post-shift is reduced
+                   multiplication. Bit length is a sum of the lengths of the operads, but capped at nmax.
+                   if range>0 specified, bit length is decreased to drop unnecessary high bits or post-shift is reduced.
 
  *var_timesC*  (string name, var_base *p1, double cF, int ps = 17):
  
