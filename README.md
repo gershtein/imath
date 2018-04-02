@@ -20,13 +20,16 @@
  the maximum and minimum values that the variable assumes are stored and updated each time calculate() is called
  if IMATH_ROOT is defined, all values are also stored in a histogram
 
- var_def     (string name, string units, double fmax, double K):
+*var_def*     (string name, string units, double fmax, double K):
+
                    define variable with bit value fval = K*ival, and maximum absolute value fmax.
                    calculates nbins on its own
                    one can assign value to it using set_ methods 
 
- var_add     (string name, var_base *p1, var_base *p2, double range = -1, int nmax = 18):
- var_subtract(string name, var_base *p1, var_base *p2, double range = -1, int nmax = 18):
+ *var_add*      (string name, var_base *p1, var_base *p2, double range = -1, int nmax = 18):
+ 
+ *var_subtract* (string name, var_base *p1, var_base *p2, double range = -1, int nmax = 18):
+ 
                    add/subtract variables. Bit length increases by 1, but capped at nmax
                    if range>0 specified, bit length is decreased to drop unnecessary high bits
 
