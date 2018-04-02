@@ -236,6 +236,9 @@ class var_adjustK : public var_base {
 
     Kmap_["2"] = Kmap_["2"] + lr_;
   }
+
+  void adjust(double Knew, double epsilon = 1e-5, bool do_assert = false, int nbits = -1);
+  
   void local_calculate();
   void print(std::ofstream& fs, int l1=0, int l2 = 0);
 
@@ -652,6 +655,7 @@ class var_inv : public var_base {
     if(LUT) delete LUT;
   }
 
+  void set_mode(mode m){ m_ = m;}
   void initLUT(double offset);  
   
   void local_calculate();

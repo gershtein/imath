@@ -42,16 +42,21 @@ void var_base::analyze()
     printf("analyzing %s: range %g is much larger then %g. suggest cutting by a factor of 2^%i\n",name_.c_str(),get_range(),u,iu);
   }
 #ifdef IMATH_ROOT
-  double eff = h_->Integral()/h_->GetEntries();
-  if(eff<0.99) {
-    printf("analyzing %s: range is too small, contains %f\n",name_.c_str(),eff);
-    h_->Print();
+  if(h_){
+    double eff = h_->Integral()/h_->GetEntries();
+    if(eff<0.99) {
+      printf("analyzing %s: range is too small, contains %f\n",name_.c_str(),eff);
+      h_->Print();
+    }
+    h_file_->cd();
+    TCanvas *c = new TCanvas();
+    c->cd();
+    h_->Draw("colz");
+    h_->Write();
   }
-   h_file_->cd();
-   TCanvas *c = new TCanvas();
-   c->cd();
-   h_->Draw("colz");
-   h_->Write();
+  else{
+    printf("analyzing %s: no histogram!\n",name_.c_str());
+  }
 #endif
 
   if(p1_) p1_->analyze();
@@ -149,6 +154,29 @@ void var_inv::writeLUT(std:: ofstream& fs)
   for(int i=0; i<Nelements_; ++i){
     fs<<LUT[i]<<"\n";
   }
+}
+
+void var_adjustK::adjust(double Knew, double epsilon, bool do_assert, int nbits)
+{
+  //WARNING!!!
+  //THIS METHID CAN BE USED ONLY FOR THE FINAL ANSWER
+  //THE CHANGE IN CONSTANT CAN NOT BE PROPAGATED UP THE CALCULATION TREE
+  
+    K_     = p1_->get_K();
+    Kmap_  = p1_->get_Kmap();
+    double r = Knew / K_;
+
+    lr_ = (r>1)? log2(r)+epsilon : log2(r);
+    K_ = K_ * pow(2,lr_);
+    if(do_assert) assert(fabs(Knew/K_ - 1)<epsilon);
+    
+    if(nbits>0)
+      nbits_ = nbits;
+    else
+      nbits_ = p1_->get_nbits()-lr_;
+
+    Kmap_["2"] = Kmap_["2"] + lr_;
+    
 }
 
 //
