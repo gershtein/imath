@@ -14,7 +14,7 @@
                    adding/subtracting variables with different units throws an exception
                    adding/subtracting variables with different shifts is allowed and is handled correctly
 
- calculate() method re-calculates the variable double and int values based on its operands
+*calculate()* method re-calculates the variable double and int values based on its operands
                    returns false in case of overflows and/or mismatches between double and int calculations.
 
  the maximum and minimum values that the variable assumes are stored and updated each time calculate() is called
