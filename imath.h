@@ -25,6 +25,10 @@
 //                   calculates nbins on its own
 //                   one can assign value to it using set_ methods 
 //
+// var_const   (string name, double fval, int nbits):
+//                   define a constant. K is calculated based on the fval and nbits
+//
+//
 // var_add     (string name, var_base *p1, var_base *p2, double range = -1, int nmax = 18):
 // var_subtract(string name, var_base *p1, var_base *p2, double range = -1, int nmax = 18):
 //                   add/subtract variables. Bit length increases by 1, but capped at nmax
@@ -37,6 +41,10 @@
 // var_timesC  (string name, var_base *p1, double cF, int ps = 17):
 //                   multiplication by a constant. Bit length stays the same
 //                   ps defines number of bits used to represent the constant
+//
+// var_DSP_postadd (string name, var_base *p1, var_base *p2, var_base *p3, double range = -1, int nmax = 18):
+//                   explicit instantiation of the 3-clock DSP postaddition: p1*p2+p3
+//                   range and nmax have the same meaning as for the var_mult.
 //
 // var_shift  (string name, var_base *p1, int shift):
 //                   shifts the variable right by shift (equivalent to multiplication by pow(2, -shift));
@@ -98,14 +106,16 @@
 //operation latencies for proper HDL pipelining
 #define MULT_LATENCY  1
 #define LUT_LATENCY   2
+#define DSP_LATENCY   3
 
 class var_base {
   
  public:
 
-  var_base(std::string name, var_base *p1, var_base *p2, int l){
+  var_base(std::string name, var_base *p1, var_base *p2, var_base *p3, int l){
     p1_ = p1;
     p2_ = p2;
+    p3_ = p3;
     name_ = name;
     latency_ = l;
     int step1 = (p1)? p1->get_step()+p1->get_latency() : 0;
@@ -116,6 +126,7 @@ class var_base {
     maxval_ = -std::numeric_limits<double>::max();
     readytoprint_ = true;
     readytoanalyze_ = true;
+    usedasinput_    = false;
     Kmap_.clear();
     Kmap_["2"] = 0; // initially, zero shift
 #ifdef IMATH_ROOT
@@ -140,8 +151,10 @@ class var_base {
   
   std::string get_kstring();
   std::string get_name() {return name_;}
+  std::string get_op() {return op_;}
   var_base*   get_p1(){return p1_;}
   var_base*   get_p2(){return p2_;}
+  var_base*   get_p3(){return p3_;}
   double      get_fval(){return fval_;}
   long int    get_ival(){return ival_;}
 
@@ -172,18 +185,23 @@ class var_base {
   bool calculate(int debug_level);
   bool calculate(){return calculate(1);}
   virtual void local_calculate(){}
-  virtual void print(std::ofstream& fs, int l1=0, int l2=0){fs<<"// var_base here. Soemthing is wrong!! "<<l1<<", "<<l2<<"\n";}
+  virtual void print(std::ofstream& fs, int l1=0, int l2=0, int l3=0){fs<<"// var_base here. Soemthing is wrong!! "<<l1<<", "<<l2<<", "<<l3<<"\n";}
   void print_step(int step, std::ofstream& fs);
   void print_all (std::ofstream& fs);
+  void get_inputs(std::vector<var_base*> *vd); //collect all inputs
+  static void Verilog_print(std::vector<var_base*> v, std::ofstream& fs);
+  static std::string pipe_delay(std::string name, int nbits, int delay);
+  static std::string pipe_delay_wire(std::string name, std::string name_delayed, int nbits, int delay);
   
   void        dump_cout();
   std::string dump();
-  std::string itos(int i);
+  static std::string itos(int i);
   
  protected:
   std::string name_;
   var_base *p1_;
   var_base *p2_;
+  var_base *p3_;
   std::string op_;    // operation
   int latency_;       // number of clock cycles for the operation (for HDL output)
   int step_;          // step number in the calculation (for HDL output)
@@ -197,6 +215,7 @@ class var_base {
 
   bool readytoanalyze_;
   bool readytoprint_;
+  bool usedasinput_;
 
   double minval_;
   double maxval_;
@@ -218,7 +237,7 @@ class var_adjustK : public var_base {
  public:
 
  var_adjustK(std::string name, var_base *p1, double Knew, double epsilon = 1e-5, bool do_assert = false, int nbits = -1):
-  var_base(name,p1,0,0){
+  var_base(name,p1,0,0,0){
     op_ = "adjustK";
     K_     = p1->get_K();
     Kmap_  = p1->get_Kmap();
@@ -240,10 +259,25 @@ class var_adjustK : public var_base {
   void adjust(double Knew, double epsilon = 1e-5, bool do_assert = false, int nbits = -1);
   
   void local_calculate();
-  void print(std::ofstream& fs, int l1=0, int l2 = 0);
+  void print(std::ofstream& fs, int l1=0, int l2 = 0, int l3 = 0);
 
  protected:
   int lr_;
+};
+
+class var_const : public var_base {
+ public:
+ var_const(std::string name, double fval, int nbits):
+  var_base(name,0,0,0,0){
+    op_ = "const";
+    nbits_ = nbits;
+    int l = log2(fabs(fval)) + 1.9999999 - nbits;
+    Kmap_["2"] = l;
+    K_ = pow(2,l);
+    fval_ = fval;
+    ival_ = fval / K_;
+  }
+  void print(std::ofstream& fs, int l1 = 0, int l2 = 0, int l3 = 0);
 };
 
 class var_def : public var_base {
@@ -252,7 +286,7 @@ class var_def : public var_base {
 
   //construct from scratch
  var_def(std::string name, std::string units, double fmax, double K):
-  var_base(name,0,0,1){
+  var_base(name,0,0,0,1){
     op_ = "def";
     K_    = K;
     nbits_ = log2(fmax / K) + 1.999999; //plus one to round up
@@ -269,7 +303,7 @@ class var_def : public var_base {
   }
   //construct from abother variable (all provenance info is lost!)
  var_def(std::string name, var_base *p):
-  var_base(name,0,0,1){
+  var_base(name,0,0,0,1){
     op_ = "def";
     K_     = p->get_K();
     nbits_ = p->get_nbits();
@@ -283,7 +317,7 @@ class var_def : public var_base {
     ival_ = ival;
     fval_ = ival * K_;
   }
-  void print(std::ofstream& fs, int l1=0, int l2 = 0);
+  void print(std::ofstream& fs, int l1=0, int l2 = 0, int l3 = 0);
 };
 
 
@@ -292,7 +326,7 @@ class var_add : public var_base {
  public:
 
  var_add(std::string name, var_base *p1, var_base *p2, double range = -1, int nmax = 18):
-  var_base(name,p1,p2,1){
+  var_base(name,p1,p2,0,1){
     op_ = "add";
 
     std::map<std::string, int> map1 = p1->get_Kmap();
@@ -371,7 +405,7 @@ class var_add : public var_base {
   }  
 
   void local_calculate();
-  void print(std::ofstream& fs, int l1=0, int l2 = 0);
+  void print(std::ofstream& fs, int l1=0, int l2 = 0, int l3 = 0);
 
  protected:
   int ps_;
@@ -386,7 +420,7 @@ class var_subtract : public var_base {
  public:
 
  var_subtract(std::string name, var_base *p1, var_base *p2, double range = -1, int nmax = 18):
-  var_base(name,p1,p2,1){
+  var_base(name,p1,p2,0,1){
     op_ = "subtract";
 
     std::map<std::string, int> map1 = p1->get_Kmap();
@@ -464,7 +498,7 @@ class var_subtract : public var_base {
   }  
 
   void local_calculate();
-  void print(std::ofstream& fs, int l1=0, int l2 = 0);
+  void print(std::ofstream& fs, int l1=0, int l2 = 0, int l3 = 0);
 
  protected:
   int ps_;
@@ -476,7 +510,7 @@ class var_nounits : public var_base {
 
  public:
  var_nounits(std::string name, var_base *p1, int ps = 17):
-  var_base(name,p1,0,MULT_LATENCY){
+  var_base(name,p1,0,0,MULT_LATENCY){
     op_ = "nounits";
     ps_ = ps;
     nbits_ = p1->get_nbits();
@@ -492,7 +526,7 @@ class var_nounits : public var_base {
   }
 
   void local_calculate();
-  void print(std::ofstream& fs, int l1=0, int l2 = 0);
+  void print(std::ofstream& fs, int l1=0, int l2 = 0, int l3 = 0);
 
  protected:
   int ps_;
@@ -502,7 +536,7 @@ class var_nounits : public var_base {
 class var_shift : public var_base {
  public:
  var_shift(std::string name, var_base *p1, int shift):
-  var_base(name,p1,0,0){
+  var_base(name,p1,0,0,0){
     op_    = "shift";
     shift_ = shift;
 
@@ -511,7 +545,7 @@ class var_shift : public var_base {
     K_     = p1->get_K();
   }
   void local_calculate();
-  void print(std::ofstream& fs, int l1=0, int l2 = 0);
+  void print(std::ofstream& fs, int l1=0, int l2 = 0, int l3 = 0);
   
   protected:
     int shift_;
@@ -521,14 +555,14 @@ class var_shift : public var_base {
 class var_neg : public var_base {
  public:
  var_neg(std::string name, var_base *p1):
-  var_base(name,p1,0,1){
+  var_base(name,p1,0,0,1){
     op_    = "neg";
     nbits_ = p1->get_nbits();
     Kmap_  = p1->get_Kmap();
     K_     = p1->get_K();
   }
   void local_calculate();
-  void print(std::ofstream& fs, int l1=0, int l2 = 0);
+  void print(std::ofstream& fs, int l1=0, int l2 = 0, int l3 = 0);
 };
 
 
@@ -536,7 +570,7 @@ class var_timesC : public var_base {
 
  public:
  var_timesC(std::string name, var_base *p1, double cF, int ps = 17):
-  var_base(name,p1,0,MULT_LATENCY){
+  var_base(name,p1,0,0,MULT_LATENCY){
     op_ = "timesC";
     cF_ = cF;
     ps_ = ps;
@@ -557,7 +591,7 @@ class var_timesC : public var_base {
   }
 
   void local_calculate();
-  void print(std::ofstream& fs, int l1=0, int l2 = 0);
+  void print(std::ofstream& fs, int l1=0, int l2 = 0, int l3 = 0);
 
  protected:
   int ps_;
@@ -569,7 +603,7 @@ class var_mult : public var_base {
   
  public:
  var_mult(std::string name, var_base *p1, var_base *p2, double range = -1, int nmax = 18):
-  var_base(name,p1,p2,MULT_LATENCY){
+  var_base(name,p1,p2,0,MULT_LATENCY){
     op_ = "mult";
     
     std::map<std::string,int> map1 = p1->get_Kmap();
@@ -607,19 +641,124 @@ class var_mult : public var_base {
     }
   }
   void local_calculate();
-  void print(std::ofstream& fs, int l1=0, int l2 = 0);
+  void print(std::ofstream& fs, int l1=0, int l2 = 0, int l3 = 0);
 
  protected:
   int ps_;
 };
+
+class var_DSP_postadd : public var_base {
+ public:
+ var_DSP_postadd(std::string name, var_base *p1, var_base *p2, var_base *p3, double range = -1, int nmax = 18):
+  var_base(name,p1,p2,p3,DSP_LATENCY){
+    op_ = "DSP_postadd";
+
+    //first, get constants for the p1*p2
+    std::map<std::string,int> map1 = p1->get_Kmap();
+    std::map<std::string,int> map2 = p2->get_Kmap();
+    std::map<std::string,int>::iterator it;
+    for(it=map2.begin(); it != map2.end(); ++it){
+      if(map1.find(it->first) == map1.end())
+	map1[it->first] = it->second;
+      else
+	map1[it->first] = map1[it->first]+it->second;
+    }
+    double k0 = p1->get_K()*p2->get_K();
+    int s0 = map1["2"];
+
+    //now addition
+    std::map<std::string, int> map3 = p3->get_Kmap();
+    int s3 = map3["2"];
     
+    //first check if the constants are all lined up
+    //go over the two maps subtracting the units
+    for(it=map3.begin(); it != map3.end(); ++it){
+      if(map1.find(it->first) == map1.end())
+	map1[it->first] = -it->second;
+      else
+	map1[it->first] = map1[it->first]-it->second;
+    }
+  
+    //assert if different
+    for(it=map1.begin(); it != map1.end(); ++it){
+      if(it->second != 0){
+	if(it->first != "2"){
+	  printf("var_DSP_postadd: bad units! %s^%i for variable %s\n",
+		 (it->first).c_str(),it->second,name_.c_str());
+	  printf(" *********************************************************\n");
+	  p1->dump_cout();
+	  printf(" *********************************************************\n");
+	  p2->dump_cout();
+	  printf(" *********************************************************\n");
+	  p3->dump_cout();
+	  assert(0);
+	}
+      }
+    }
+    
+    double ki1 = k0/pow(2,s0);
+    double ki2 = p3->get_K()/pow(2,s3);
+    //those should be the same
+    if(fabs(ki1/ki2-1.)>1e-6){
+      printf("var_DSP_postadd: bad constants! %f %f for variable %s\n",
+	     ki1,ki2,name_.c_str());
+      printf(" *********************************************************\n");
+      p1->dump_cout();
+      printf(" *********************************************************\n");
+      p2->dump_cout();
+      printf(" *********************************************************\n");
+      p3->dump_cout();
+      assert(0);
+    }
+    //everything checks out!
+    
+    shift3_ = s3-s0;
+    if(shift3_<0){
+      printf("var_DSP_postadd: loosing precision on C in A*B+C: %i\n",shift3_);
+      assert(0);
+    }
+
+    Kmap_ = p3->get_Kmap();
+    Kmap_["2"] = Kmap_["2"]-shift3_;
+    
+    int n12 = p1->get_nbits() + p2->get_nbits();
+    int n3  = p3->get_nbits() + shift3_;
+    int n0 = 1 + (n12>n3?n12:n3);
+
+    //before shifting, check the range
+    if(range > 0){
+      n0 = log2(range/ki2/pow(2,s3))+1e-9;
+      n0 = n0 + 2;
+    }
+    
+    if(n0<=nmax){ //if it fits, we're done
+      ps_ = 0;
+      nbits_ = n0;
+    }
+    else{
+      ps_ = n0 - nmax;
+      Kmap_["2"] = Kmap_["2"]+ps_;
+      nbits_ = nmax;
+    }
+
+    K_ = ki2 * pow(2,Kmap_["2"]);    
+  }
+  void local_calculate();
+  void print(std::ofstream& fs, int l1=0, int l2 = 0, int l3 = 0);
+
+ protected:
+  int ps_;
+  int shift3_;
+
+};
+
 class var_inv : public var_base {
 
  public:
   enum mode {pos, neg, both};
   
  var_inv(std::string name, var_base *p1, double offset, int nbits, int n, unsigned int shift, mode m, int nbaddr = -1):
-  var_base(name,p1,0,LUT_LATENCY){
+  var_base(name,p1,0,0,LUT_LATENCY){
     op_ = "inv";
     offset_ = offset;
     nbits_  = nbits;
@@ -659,7 +798,7 @@ class var_inv : public var_base {
   void initLUT(double offset);  
   
   void local_calculate();
-  void print(std::ofstream& fs, int l1=0, int l2 = 0);
+  void print(std::ofstream& fs, int l1=0, int l2 = 0, int l3 = 0);
   void writeLUT(std::ofstream& fs);
 
   int ival_to_addr(int ival){ return ((ival>>shift_)&mask_);}

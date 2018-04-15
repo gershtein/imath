@@ -41,9 +41,10 @@ int main()
   // static var_mult v5("v5",&v2,&v4, 3.);
   static var_add  v6("v6",&v3,&v5);
   static var_adjustK v7("v7",&v6,v6.get_K()/4.);
+
+  static var_add v8("v8",&v1,&v2);
   
-  
-  for(int i=0; i<100000; ++i){
+  for(int i=0; i<10000; ++i){
     float fv1 = 10+rr.Rndm()*27.;
     float fv2 = 20+10*rr.Rndm();
     if(rr.Rndm()>0.5) fv2 = -fv2;
@@ -54,10 +55,13 @@ int main()
     v7.calculate(1);
   }
 
-  ofstream fs("test.out");
-  
-  v7.print_all(fs);
   v7.analyze();
-
   
+  ofstream fs("test.out");
+  vector<var_base*> vv;
+  vv.push_back(&v7);
+  vv.push_back(&v8);
+
+  var_base::Verilog_print(vv,fs);
+
 };

@@ -90,34 +90,35 @@ bool var_base::calculate(int debug_level)
 {
   bool ok1 = true;
   bool ok2 = true;
+  bool ok3 = true;
   
   if(p1_) ok1 = p1_->calculate(debug_level);
   if(p2_) ok2 = p2_->calculate(debug_level);
-  
+  if(p3_) ok3 = p3_->calculate(debug_level);
+
+  long int ival_prev = ival_;
   local_calculate();
 
-  bool all_ok = ok1 && ok2;
+  bool all_ok = ok1 && ok2 && ok3;
 
-  if(debug_level == 3 || all_ok){
-    if(fval_ > maxval_) maxval_ = fval_;
-    if(fval_ < minval_) minval_ = fval_;
+  if(fval_ > maxval_) maxval_ = fval_;
+  if(fval_ < minval_) minval_ = fval_;
 #ifdef IMATH_ROOT
-    if(h_==0){
-      h_file_->cd();
-      std::string hname = "h_"+name_;
-      h_ = (TH2F*) h_file_->Get(hname.c_str());
-      if(h_ == 0){
-	std::string st = name_+";fval;fval-ival*K";
-	h_ = new TH2F(hname.c_str(),name_.c_str(),
-		      h_nbins_,-get_range(), get_range(),
-		      h_nbins_,-get_range()*h_precision_, get_range()*h_precision_);
-	if(debug_level==3) std::cout<<" booking histogram "<<hname<<"\n";
-      }
+  if(h_==0){
+    h_file_->cd();
+    std::string hname = "h_"+name_;
+    h_ = (TH2F*) h_file_->Get(hname.c_str());
+    if(h_ == 0){
+      std::string st = name_+";fval;fval-ival*K";
+      h_ = new TH2F(hname.c_str(),name_.c_str(),
+		    h_nbins_,-get_range(), get_range(),
+		    h_nbins_,-get_range()*h_precision_, get_range()*h_precision_);
+      if(debug_level==3) std::cout<<" booking histogram "<<hname<<"\n";
     }
-    h_->Fill(fval_, K_*ival_-fval_);
-#endif
   }
-  
+  if(ival_ != ival_prev || op_=="def" || op_=="const") h_->Fill(fval_, K_*ival_-fval_);
+#endif
+
   bool todump = false;
   int nmax = sizeof(long int)*8;
   int ns = nmax - nbits_;
@@ -125,7 +126,7 @@ bool var_base::calculate(int debug_level)
   itest = itest<<ns;
   itest = itest>>ns;
   if(itest!=ival_){
-    if(debug_level == 3 || all_ok){
+    if(ival_!=ival_prev && (debug_level == 3 || all_ok)){
       std::cout<<"imath: truncated value mismatch!! "<<ival_<<" != "<<itest<<"\n";
       todump = true;
     }
@@ -136,7 +137,7 @@ bool var_base::calculate(int debug_level)
   float tolerance = 0.1 * fabs(fval_);
   if(tolerance < 2 * K_) tolerance = 2 * K_;
   if(fabs(ftest-fval_)> tolerance){
-    if(debug_level == 3 || (all_ok && (op_!="inv" ||debug_level>=2 ))){
+    if(ival_!=ival_prev && (debug_level == 3 || (all_ok && (op_!="inv" ||debug_level>=2 )))){
       std::cout<<"imath: **GROSS** value mismatch!! "<<fval_<<" != "<<ftest<<"\n";
       todump = true;
     }
@@ -239,6 +240,17 @@ void var_mult::local_calculate()
   fval_ = p1_->get_fval() * p2_->get_fval();
   ival_ = (p1_->get_ival() * p2_->get_ival())>>ps_;
 }
+
+void var_DSP_postadd::local_calculate()
+{
+  fval_ = p1_->get_fval() * p2_->get_fval() + p3_->get_fval();
+  ival_ = p3_->get_ival();
+  if(shift3_>0) ival_ = ival_<<shift3_;
+  if(shift3_<0) ival_ = ival_>>(-shift3_);
+  ival_ += p1_->get_ival() * p2_->get_ival();
+  ival_ = ival_>>ps_;
+}
+
 void var_inv::initLUT(double offset)
 {
   offset_ = offset;
@@ -263,9 +275,27 @@ void var_inv::local_calculate()
 
 void var_base::makeready()
 {
-  readytoprint_ = true;
+  readytoprint_   = true;
+  readytoanalyze_ = true;
+  usedasinput_    = false;
   if(p1_) p1_->makeready();
   if(p2_) p2_->makeready();
+  if(p3_) p3_->makeready();
+}
+
+std::string var_base::pipe_delay(std::string name, int nbits, int delay)
+{
+  std::string name_delayed = name+"_delay"+itos(delay);
+  std::string out = "wire ["+itos(nbits-1)+":0] "+name_delayed+";\n";
+  out = out + pipe_delay_wire(name, name_delayed, nbits, delay);
+  return out;
+}
+std::string var_base::pipe_delay_wire(std::string name, std::string name_delayed, int nbits, int delay)
+{
+  std::string name_pipe    = name+"_pipe";
+  std::string out = "pipe_delay #(.STAGES("+itos(delay)+"), .WIDTH("+itos(nbits)+")) "
+    + name_pipe + "(.clk(clk), .val_in("+name+"), .val_out("+name_delayed+"));\n";
+  return out;
 }
 
 void var_base::print_step(int step, std::ofstream& fs){
@@ -273,6 +303,7 @@ void var_base::print_step(int step, std::ofstream& fs){
   if(step > step_) return;
   int l1 = 0;
   int l2 = 0;
+  int l3 = 0;
   if(p1_) {
     p1_->print_step(step, fs);
     l1 = step_ - p1_->get_latency() - p1_->get_step();
@@ -281,16 +312,36 @@ void var_base::print_step(int step, std::ofstream& fs){
     p2_->print_step(step, fs);
     l2 = step_ - p2_->get_latency() - p2_->get_step();
   }
+  if(p3_) {
+    p3_->print_step(step, fs);
+    l3 = step_ - p3_->get_latency() - p3_->get_step();
+  }
   if(step==step_){
-    if(l1<0 || l2<0 || (l1>0&&l2>0) ){
-      printf("%s::print_step(%i): something wrong with latencies! %i %i\n",name_.c_str(),step,l1, l2);
+    if(l1<0 || l2<0 ||l3<0 || (l1>0&&l2>0&&l3>0) ){
+      printf("%s::print_step(%i): something wrong with latencies! %i %i %i\n",name_.c_str(),step,l1, l2, l3);
       dump_cout();
       assert(0);      
     }
-    if(l1>0) fs<<"pipe_delay("+p1_->get_name()+", "+p1_->get_name()+"_delay"+itos(l1)+", "+itos(l1)+");\n";
-    if(l2>0) fs<<"pipe_delay("+p2_->get_name()+", "+p2_->get_name()+"_delay"+itos(l2)+", "+itos(l2)+");\n";
+    if(l1>0) {
+      if(p1_->get_op()!="const")
+	fs<<pipe_delay(p1_->get_name(),p1_->get_nbits(),l1);
+      else
+	l1 = 0;
+    }
+    if(l2>0) {
+      if(p2_->get_op()!="const")
+	fs<<pipe_delay(p2_->get_name(),p2_->get_nbits(),l2);
+      else
+	l2 = 0;
+    }
+    if(l3>0) {
+      if(p3_->get_op()!="const")
+	fs<<pipe_delay(p3_->get_name(),p3_->get_nbits(),l3);
+      else
+	l3 = 0;
+    }
   
-    print(fs, l1, l2);
+    print(fs, l1, l2, l3);
     readytoprint_ = false;
   }
 }
@@ -303,136 +354,300 @@ void var_base::print_all(std::ofstream& fs)
   }
 }
 
-void var_adjustK::print(std::ofstream& fs, int l1, int l2)
+void var_base::get_inputs(std::vector<var_base*> *vd)
+{
+  if(op_ == "def" && !usedasinput_){
+    usedasinput_ = true;
+    vd->push_back(this);
+  }
+  else{
+    if(p1_) p1_->get_inputs(vd);
+    if(p2_) p2_->get_inputs(vd);
+    if(p3_) p3_->get_inputs(vd);
+  }
+}
+
+void var_base::Verilog_print(std::vector<var_base*> v, std::ofstream& fs)
+{
+
+  //step at which all the outputs should be valid
+  int maxstep = 0;
+  
+  //header of the module
+
+  //inputs
+  std::vector<var_base*> vd;
+  vd.clear();
+  int imax = v.size();
+  for(int i=0; i<imax; ++i){
+    (v[i])->get_inputs(&vd);
+    if(v[i]->get_step() > maxstep) maxstep = v[i]->get_step();
+  }
+
+  //print header
+  fs<<"module \n";
+  fs<<"(\n";
+  fs<<"   input clk,\n";
+  fs<<"   input reset,\n\n";
+
+  imax = vd.size();
+  for(int i=0; i<imax; ++i)
+    fs<<"   input ["<<(vd[i])->get_nbits()-1<<":0] "<<(vd[i])->get_name()<<"_wire,\n";
+  fs<<"\n";
+
+  imax = v.size()-1;
+  for(int i=0; i<imax; ++i)
+    fs<<"   output ["<<(v[i])->get_nbits()-1<<":0] "<<(v[i])->get_name()<<"_wire,\n";
+  if(imax>=0)
+    fs<<"   output ["<<(v[imax])->get_nbits()-1<<":0] "<<(v[imax])->get_name()<<"_wire\n";
+  fs<<");\n\n";
+
+  //body of the module
+  imax = v.size();
+  for(int i=0; i<imax; ++i){
+    fs<<"\n//\n";
+    fs<<"// calculating "<<(v[i])->get_name()<<"\n";
+    fs<<"//\n";
+    (v[i])->print_all(fs);
+  }
+  fs<<"\n";
+
+  //trailer
+  fs<<"\n";  
+  fs<<"\n//\n";
+  fs<<"// wiring the outputs \n";
+  fs<<"// latency = "<<maxstep<<"\n";
+  fs<<"//\n";
+  for(int i=0; i<imax; ++i){
+    std::string n = v[i]->get_name()+"_wire";
+    int delay = maxstep - v[i]->get_step();
+    if(delay==0)
+      fs<<"assign "<< n <<" = "<<(v[i])->get_name()<<";\n";
+    else
+      fs<<pipe_delay_wire(v[i]->get_name(),n, v[i]->get_nbits(), delay);
+  }
+  
+  fs<<"endmodule\n";
+}
+
+void var_adjustK::print(std::ofstream& fs, int l1, int l2, int l3)
 {
   assert(p1_);
   assert(l2==0);
+  assert(l3==0);
 
   std::string shift = "";
   if(lr_>0)
-    shift = " >> " + itos(lr_);
+    shift = " >>> " + itos(lr_);
   else if(lr_<0)
     shift = " << " + itos(-lr_);
 
   std::string n1 = p1_->get_name();
   if(l1>0) n1 = n1 + "_delay"+itos(l1);
-  std::string t = name_ + " = " + n1 + shift;
 
-  fs<<t<<"; "<<std::string(40-t.size(),' ')<<"// "<<nbits_ <<" bits \t "<<get_kstring()<<"\t"<<K_<<"\n";
+  fs<<"// "<<nbits_ <<" bits \t "<<get_kstring()<<"\t"<<K_<<"\n"; 
+  std::string t = "wire signed ["+itos(nbits_-1)+":0]"+name_+";\n";
+  t += "assign "+name_+" = "+n1;
+  fs<<t<<"; \n";
   
 }
 
-void var_def::print(std::ofstream& fs, int l1, int l2)
+void var_def::print(std::ofstream& fs, int l1, int l2, int l3)
 {
   assert(l1==0);
   assert(l2==0);
-  std::string t = name_ + " = " + itos(ival_);
-  fs<<t<<"; "<<std::string(40-t.size(),' ')<<"// "<<nbits_ <<" bits \t "<<get_kstring()<<"\t"<<K_<<"\n"; 
+  assert(l3==0);
+
+  std::string t = "reg signed  ["+itos(nbits_-1)+":0]"+name_+";\n";
+  t = t + "always @(posedge clk) "+name_+" <= "+name_+"_wire;\n";
+  fs<<"// units "<<get_kstring()<<"\t"<<K_<<"\n"<<t; 
 }
 
-void var_add::print(std::ofstream& fs, int l1, int l2)
+void var_const::print(std::ofstream& fs, int l1, int l2, int l3)
+{
+  assert(l1==0);
+  assert(l2==0);
+  assert(l3==0);
+  std::string t = "parameter "+ name_ + " = " +itos(nbits_) + "\'ds"+ itos(ival_);
+  fs<<"// "<<nbits_ <<" bits \t "<<get_kstring()<<"\t"<<K_<<"\n"<<t<<";\n"; 
+}
+
+void var_add::print(std::ofstream& fs, int l1, int l2, int l3)
 {
   assert(p1_);
   assert(p2_);
-  std::string t = p1_->get_name();
-  if(l1>0) t = t+"_delay"+itos(l1);
-  if(shift1>0) t += "<<"+itos(shift1);
-  t += " + " + p2_->get_name();
-  if(l2>0) t = t+"_delay"+itos(l2);
-  if(shift2>0) t += "<<"+itos(shift2);
-  if(ps_>0) t = "("+t+")>>"+itos(ps_);
-  t = name_ + " = " + t;
+  assert(l3==0);
+  std::string o1 = p1_->get_name();
+  if(l1>0) o1 += "_delay"+itos(l1);
+  if(shift1>0) o1 += "<<"+itos(shift1);
   
-  fs<<t<<"; "<<std::string(40-t.size(),' ')<<"// "<<nbits_ <<" bits \t "<<get_kstring()<<"\t"<<K_<<"\n"; 
+  std::string o2 = p2_->get_name();
+  if(l2>0) o2 += "_delay"+itos(l2);
+  if(shift2>0) o2 += "<<"+itos(shift2);
+
+  o1 = o1 + " + " + o2; 
+  if(ps_>0) o1 = "("+o1+")>>>"+itos(ps_);
+  
+  std::string t = "reg signed  ["+itos(nbits_-1)+":0]"+name_+";\n";
+  t += "always @(posedge clk) "+name_+" <= "+o1;
+  fs<<"// "<<nbits_ <<" bits \t "<<get_kstring()<<"\t"<<K_<<"\n"<<t<<";\n"; 
 }
 
-void var_subtract::print(std::ofstream& fs, int l1, int l2)
+void var_subtract::print(std::ofstream& fs, int l1, int l2, int l3)
 {
   assert(p1_);
   assert(p2_);
-  std::string t = p1_->get_name();
-  if(l1>0) t = t+"_delay"+itos(l1);
-  if(shift1>0) t += "<<"+itos(shift1);
-  t += " - " + p2_->get_name();
-  if(l2>0) t = t+"_delay"+itos(l2);
-  if(shift2>0) t += "<<"+itos(shift2);
-  if(ps_>0) t = "("+t+")>>"+itos(ps_);
-  t = name_ + " = " + t;
+  assert(l3==0);
+  std::string o1 = p1_->get_name();
+  if(l1>0) o1 += "_delay"+itos(l1);
+  if(shift1>0) o1 += "<<"+itos(shift1);
+  
+  std::string o2 = p2_->get_name();
+  if(l2>0) o2 += "_delay"+itos(l2);
+  if(shift2>0) o2 += "<<"+itos(shift2);
 
-  fs<<t<<"; "<<std::string(40-t.size(),' ')<<"// "<<nbits_ <<" bits \t "<<get_kstring()<<"\t"<<K_<<"\n"; 
-}
-
-void var_nounits::print(std::ofstream& fs, int l1, int l2)
-{
-  assert(p1_);
-  assert(l2==0);
-  std::string n1 = p1_->get_name();
-  if(l1>0) n1 = n1 + "_delay"+itos(l1);
-  std::string t = name_ + " = (" + n1 + " * " + itos(cI_) + ")";
-  if(ps_>0) t = t + ">>" + itos(ps_);
-  fs<<t<<"; "<<std::string(40-t.size(),' ')<<"// "<<nbits_ <<" bits \t "<<get_kstring()<<"\t"<<K_<<"\n"; 
+  o1 = o1 + " - " + o2; 
+  if(ps_>0) o1 = "("+o1+")>>>"+itos(ps_);
+  
+  std::string t = "reg signed  ["+itos(nbits_-1)+":0]"+name_+";\n";
+  t += "always @(posedge clk) "+name_+" <= "+o1;
+  fs<<"// "<<nbits_ <<" bits \t "<<get_kstring()<<"\t"<<K_<<"\n"<<t<<";\n"; 
 }
 
-void var_timesC::print(std::ofstream& fs, int l1, int l2)
+void var_nounits::print(std::ofstream& fs, int l1, int l2, int l3)
 {
   assert(p1_);
   assert(l2==0);
+  assert(l3==0);
   std::string n1 = p1_->get_name();
   if(l1>0) n1 = n1 + "_delay"+itos(l1);
-  std::string t = name_ + " = (" + n1 + " * " + itos(cI_) + ")";
-  if(ps_>0) t = t + ">>" + itos(ps_);
-  fs<<t<<"; "<<std::string(40-t.size(),' ')<<"// "<<nbits_ <<" bits \t "<<get_kstring()<<"\t"<<K_<<"\n"; 
+  std::string o1 = name_ + " = (" + n1 + " * " + itos(cI_) + ")";
+  if(ps_>0) o1 = o1 + ">>>" + itos(ps_);
+
+  std::string t = "reg signed  ["+itos(nbits_-1)+":0]"+name_+";\n";
+  t += "always @(posedge clk) "+name_+" <= "+o1;
+  fs<<"// "<<nbits_ <<" bits \t "<<get_kstring()<<"\t"<<K_<<"\n"<<t<<";\n"; 
 }
-void var_neg::print(std::ofstream& fs, int l1, int l2)
+
+void var_timesC::print(std::ofstream& fs, int l1, int l2, int l3)
 {
   assert(p1_);
   assert(l2==0);
+  assert(l3==0);
   std::string n1 = p1_->get_name();
   if(l1>0) n1 = n1 + "_delay"+itos(l1);
-  std::string t = name_ + " = - " + n1;
-  fs<<t<<"; "<<std::string(40-t.size(),' ')<<"// "<<nbits_ <<" bits \t "<<get_kstring()<<"\t"<<K_<<"\n"; 
+  std::string o1 = name_ + " = (" + n1 + " * " + itos(cI_) + ")";
+  if(ps_>0) o1 = o1 + ">>>" + itos(ps_);
+
+  std::string t = "reg signed  ["+itos(nbits_-1)+":0]"+name_+";\n";
+  t += "always @(posedge clk) "+name_+" <= "+o1;
+  fs<<"// "<<nbits_ <<" bits \t "<<get_kstring()<<"\t"<<K_<<"\n"<<t<<";\n"; 
 }
-void var_shift::print(std::ofstream& fs, int l1, int l2)
+void var_neg::print(std::ofstream& fs, int l1, int l2, int l3)
 {
   assert(p1_);
   assert(l2==0);
+  assert(l3==0);
   std::string n1 = p1_->get_name();
   if(l1>0) n1 = n1 + "_delay"+itos(l1);
-  std::string t = name_ + " = " + n1;
-  if(shift_>0) t = t + ">>" + itos(shift_);
-  if(shift_<0) t = t + "<<" + itos(-shift_);
-  fs<<t<<"; "<<std::string(40-t.size(),' ')<<"// "<<nbits_ <<" bits \t "<<get_kstring()<<"\t"<<K_<<"\n"; 
+  std::string o1 = name_ + " = - " + n1;
+
+  std::string t = "reg signed  ["+itos(nbits_-1)+":0]"+name_+";\n";
+  t += "always @(posedge clk) "+name_+" <= "+o1;
+  fs<<"// "<<nbits_ <<" bits \t "<<get_kstring()<<"\t"<<K_<<"\n"<<t<<";\n"; 
 }
-void var_mult::print(std::ofstream& fs, int l1, int l2)
+void var_shift::print(std::ofstream& fs, int l1, int l2, int l3)
 {
+  assert(p1_);
+  assert(l2==0);
+  assert(l3==0);
+  std::string n1 = p1_->get_name();
+  if(l1>0) n1 = n1 + "_delay"+itos(l1);
+  std::string o1 = name_ + " = " + n1;
+  if(shift_>0) o1 = o1 + ">>>" + itos(shift_);
+  if(shift_<0) o1 = o1 + "<<" + itos(-shift_);
+
+  std::string t = "wire signed ["+itos(nbits_-1)+":0]"+name_+";\n";
+  t += "assign "+name_+" = "+o1;
+  fs<<"// "<<nbits_ <<" bits \t "<<get_kstring()<<"\t"<<K_<<"\n"<<t<<";\n"; 
+}
+void var_mult::print(std::ofstream& fs, int l1, int l2, int l3)
+{
+  assert(l3==0);
   assert(p1_);
   std::string n1 = p1_->get_name();
   if(l1>0) n1 = n1 + "_delay"+itos(l1);
   assert(p2_);
   std::string n2 = p2_->get_name();
   if(l2>0) n2 = n2 + "_delay"+itos(l2);
-  std::string t = name_ + " = (" + n1 + " * " + n2 + ")";
-  if(ps_>0) t = t + ">>" + itos(ps_);
-  fs<<t<<"; "<<std::string(40-t.size(),' ')<<"// "<<nbits_ <<" bits \t "<<get_kstring()<<"\t"<<K_<<"\n"; 
+  std::string o1 =  n1 + " * " + n2;
+  if(ps_>0) o1 = "( "+o1 + ")>>>" + itos(ps_);
+
+  std::string t = "reg signed  ["+itos(nbits_-1)+":0]"+name_+";\n";
+  t += "always @(posedge clk) "+name_+" <= "+o1;
+  fs<<"// "<<nbits_ <<" bits \t "<<get_kstring()<<"\t"<<K_<<"\n"<<t<<";\n"; 
 }
-void var_inv::print(std::ofstream& fs, int l1, int l2)
+void var_inv::print(std::ofstream& fs, int l1, int l2, int l3)
 {
   assert(p1_);
   assert(l2==0);
+  assert(l3==0);
   std::string n1 = p1_->get_name();
   if(l1>0) n1 = n1 + "_delay"+itos(l1);
   //first calculate address
   std::string t1 = "addr_" + name_;
-  std::string t = t1 + " = ";
+  std::string t = "wire ["+itos(nbaddr_-1)+":0] "+t1+";\n";
+  t =   t + "assign "+t1+" = ";
   if(shift_>0)
-    t = t + "(" + n1 + ">>"+itos(shift_)+") & "+itos(mask_);
+    t = t + "(" + n1 + ">>>"+itos(shift_)+") & "+itos(mask_);
   else
     t = t + n1 + " & "+itos(mask_);
   fs<<t<<"; // address for the LUT\n"; 
-  
+
+  t = "wire signed ["+ itos(nbits_-1) + ":0] "+ name_ + ";\n";
+  fs<<t;
+
   std::string t2 = "LUT_" + name_;
-  t = name_ + " = " + t2 + "[" + t1 + "]";
-  fs<<t<<"; "<<std::string(40-t.size(),' ')<<"// "<<nbits_ <<" bits \t "<<get_kstring()<<"\t"<<K_<<"\n"; 
+
+  fs<<"Memory #( \n";
+  fs<<"         .RAM_WIDTH("<<nbits_<<"),            // Specify RAM data width \n";
+  fs<<"         .RAM_DEPTH("<<Nelements_<<"),                     // Specify RAM depth (number of entries) \n";
+  fs<<"         .RAM_PERFORMANCE(\"HIGH_PERFORMANCE\"), // \"HIGH_PERFORMANCE\" = 2 clks latency \n";
+  fs<<"         .INIT_FILE() \n";
+  fs<<"       ) "<< t2 <<" ( \n";
+  fs<<"         .addra("<<itos(nbaddr_)<<"\'b0),    // Write address bus, width determined from RAM_DEPTH  \n";
+  fs<<"         .addrb("<<t1<<" ),                   // Read address bus, width determined from RAM_DEPTH  \n";
+  fs<<"         .dina("<<itos(nbits_)<<"\'b0),      // RAM input data, width determined from RAM_WIDTH   \n";
+  fs<<"         .clka(clk),      // Write clock \n";
+  fs<<"         .clkb(clk),      // Read clock  \n";
+  fs<<"         .wea(1\'b0),        // Write enable  \n";
+  fs<<"         .enb(1\'b1),        // Read Enable, for additional power savings, disable when not in use  \n";
+  fs<<"         .rstb(reset),      // Output reset (does not affect memory contents)                      \n";
+  fs<<"         .regceb(1\'b1),  // Output register enable                                                \n";
+  fs<<"         .doutb("<<name_<<")     // RAM output data,                                                \n";
+  fs<<"     ); \n";
+
+
 }
 
+void var_DSP_postadd::print(std::ofstream& fs, int l1, int l2, int l3)
+{
+  assert(p1_);
+  assert(p2_);
+  assert(p3_);
+  std::string n1 = p1_->get_name();
+  if(l1>0) n1 = n1 + "_delay"+itos(l1);
+  std::string n2 = p2_->get_name();
+  if(l2>0) n2 = n2 + "_delay"+itos(l2);
+  std::string n3 = p3_->get_name();
+  if(l3>0) n3 = n3 + "_delay"+itos(l3);
 
+  if(shift3_ >0) n3 = n3 + "<<"+itos(shift3_);
+  if(shift3_ <0) n3 = n3 + ">>>"+itos(-shift3_);
+
+  std::string n4 = "";
+  if(ps_>0) n4 = ">>>"+itos(ps_);
+  
+  fs<<name_+" = DSP_postadd("+n1+", "+n2+", "+n3+")"+n4+";";
+  
+}
