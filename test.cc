@@ -42,7 +42,9 @@ int main()
   static var_add  v6("v6",&v3,&v5);
   static var_adjustK v7("v7",&v6,v6.get_K()/4.);
 
-  static var_add v8("v8",&v1,&v2);
+  static var_param v0("v9",1/6., 10);
+  static var_add   v8("v8",&v1,&v2);
+  static var_mult  v9("v9",&v8,&v0);
   
   for(int i=0; i<10000; ++i){
     float fv1 = 10+rr.Rndm()*27.;
@@ -60,7 +62,7 @@ int main()
   ofstream fs("test.out");
   vector<var_base*> vv;
   vv.push_back(&v7);
-  vv.push_back(&v8);
+  vv.push_back(&v9);
 
   var_base::Verilog_print(vv,fs);
 

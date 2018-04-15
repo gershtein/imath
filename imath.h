@@ -25,9 +25,12 @@
 //                   calculates nbins on its own
 //                   one can assign value to it using set_ methods 
 //
-// var_const   (string name, double fval, int nbits):
-//                   define a constant. K is calculated based on the fval and nbits
+// var_param   (string name, string units, double fval, int nbits):
+//                   define a parameter. K is calculated based on the fval and nbits
 //
+//         or  (string name, std::string units, double fval, double K):
+//                   define a parameer with bit value fval = K*ival.
+//                   calculates nbins on its own
 //
 // var_add     (string name, var_base *p1, var_base *p2, double range = -1, int nmax = 18):
 // var_subtract(string name, var_base *p1, var_base *p2, double range = -1, int nmax = 18):
@@ -265,9 +268,9 @@ class var_adjustK : public var_base {
   int lr_;
 };
 
-class var_const : public var_base {
+class var_param : public var_base {
  public:
- var_const(std::string name, double fval, int nbits):
+ var_param(std::string name, double fval, int nbits):
   var_base(name,0,0,0,0){
     op_ = "const";
     nbits_ = nbits;
@@ -276,6 +279,31 @@ class var_const : public var_base {
     K_ = pow(2,l);
     fval_ = fval;
     ival_ = fval / K_;
+  }
+ var_param(std::string name, std::string units, double fval, double K):
+  var_base(name,0,0,0,0){
+    op_ = "const";
+    K_    = K;
+    nbits_ = log2(fval / K) + 1.999999; //plus one to round up
+    if(units!="")
+      Kmap_[units] = 1;
+    else{
+      //defining a constant, K should be a power of two
+      int l = log2(K);
+      if(fabs(pow(2,l)/K-1)>1e-5){
+	printf("defining unitless constant, yet K is not a power of 2! %g, %g\n",K, pow(2,l));
+      }
+      Kmap_["2"] = l;
+    }
+  }
+  
+  void    set_fval(double fval){
+    fval_ = fval;
+    ival_ = fval / K_;
+  }
+  void    set_ival(int ival){
+    ival_ = ival;
+    fval_ = ival * K_;
   }
   void print(std::ofstream& fs, int l1 = 0, int l2 = 0, int l3 = 0);
 };

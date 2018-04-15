@@ -463,7 +463,7 @@ void var_def::print(std::ofstream& fs, int l1, int l2, int l3)
   fs<<"// units "<<get_kstring()<<"\t"<<K_<<"\n"<<t; 
 }
 
-void var_const::print(std::ofstream& fs, int l1, int l2, int l3)
+void var_param::print(std::ofstream& fs, int l1, int l2, int l3)
 {
   assert(l1==0);
   assert(l2==0);

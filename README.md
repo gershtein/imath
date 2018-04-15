@@ -28,9 +28,16 @@
                    calculates nbins on its own.
                    one can assign value to it using set_ methods.
 
-*var_const*   (string name, double fval, int nbits):
+*var_param*   (string name, double fval, int nbits):
 
-                   define a constant. K is calculated based on the fval and nbits
+                   define a parameter. K is calculated based on the fval and nbits.
+		   one can assign value to it using set_ methods.
+
+              (string name, string units, double fmax, double K):
+
+                   define parameter with bit value fval = K*ival.
+                   calculates nbins on its own.
+                   one can assign value to it using set_ methods.
 
  *var_add*      (string name, var_base *p1, var_base *p2, double range = -1, int nmax = 18):
  
