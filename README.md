@@ -14,6 +14,8 @@
                    adding/subtracting variables with different units throws an exception.
                    adding/subtracting variables with different shifts is allowed and is handled correctly.
 
+*Verilog_print()* method takes a vector of the outputs and produces a proper Verilog module
+
 *calculate()* method re-calculates the variable double and int values based on its operands
                    returns false in case of overflows and/or mismatches between double and int calculations.
 
@@ -24,7 +26,11 @@
 
                    define variable with bit value fval = K*ival, and maximum absolute value fmax.
                    calculates nbins on its own.
-                   one can assign value to it using set_ methods. 
+                   one can assign value to it using set_ methods.
+
+*var_const*   (string name, double fval, int nbits):
+
+                   define a constant. K is calculated based on the fval and nbits
 
  *var_add*      (string name, var_base *p1, var_base *p2, double range = -1, int nmax = 18):
  
@@ -43,7 +49,12 @@
                    multiplication by a constant. Bit length stays the same
                    ps defines number of bits used to represent the constant
 
- *var_shift*  (string name, var_base *p1, int shift):
+*var_DSP_postadd* (string name, var_base *p1, var_base *p2, var_base *p3, double range = -1, int nmax = 18):
+
+                   explicit instantiation of the 3-clock DSP postaddition: p1*p2+p3
+                   range and nmax have the same meaning as for the var_mult.
+
+*var_shift*  (string name, var_base *p1, int shift):
  
                    shifts the variable right by shift (equivalent to multiplication by pow(2, -shift));
                    Units stay the same, nbits are adjusted.
