@@ -19,9 +19,9 @@
 
 #include "imath.h"
 
-// a hack to permit the static file handle
 #ifdef IMATH_ROOT
 TFile* var_base::h_file_=0;
+bool   var_base::use_root = true;
 #endif
 
 using namespace std;
@@ -45,6 +45,8 @@ int main()
   static var_param v0("v9",1/6., 10);
   static var_add   v8("v8",&v1,&v2);
   static var_mult  v9("v9",&v8,&v0);
+
+  TTree *tt = var_base::AddToTree(&v7);
   
   for(int i=0; i<10000; ++i){
     float fv1 = 10+rr.Rndm()*27.;
@@ -55,9 +57,11 @@ int main()
     v2.set_fval(fv2);
     v3.set_fval(fv3);
     v7.calculate(1);
+    tt->Fill();
   }
 
   v7.analyze();
+  tt->Write();
   
   ofstream fs("test.out");
   vector<var_base*> vv;
@@ -65,5 +69,5 @@ int main()
   vv.push_back(&v9);
 
   var_base::Verilog_print(vv,fs);
-
+  
 };

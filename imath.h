@@ -94,6 +94,7 @@
 #include <limits>
 #include <iostream>
 #include <fstream>
+#include <vector>
 #include <map>
 #include <math.h>
 #include <sstream>
@@ -104,6 +105,7 @@
 #include "TH2F.h"
 #include "TFile.h"
 #include "TCanvas.h"
+#include "TTree.h"
 #endif
 
 //operation latencies for proper HDL pipelining
@@ -135,7 +137,7 @@ class var_base {
 #ifdef IMATH_ROOT
     h_ = 0;
     h_nbins_ = 1024;
-    h_precision_ = 0.05;
+    h_precision_ = 0.02;
     if(h_file_ == 0){
       h_file_ = new TFile("imath.root","RECREATE");
       printf("recreating file imath.root\n");
@@ -186,7 +188,7 @@ class var_base {
   int  get_step(){return step_;}
   int  get_latency(){return latency_;}
   bool calculate(int debug_level);
-  bool calculate(){return calculate(1);}
+  bool calculate(){return calculate(0);}
   virtual void local_calculate(){}
   virtual void print(std::ofstream& fs, int l1=0, int l2=0, int l3=0){fs<<"// var_base here. Soemthing is wrong!! "<<l1<<", "<<l2<<", "<<l3<<"\n";}
   void print_step(int step, std::ofstream& fs);
@@ -195,6 +197,16 @@ class var_base {
   static void Verilog_print(std::vector<var_base*> v, std::ofstream& fs);
   static std::string pipe_delay(std::string name, int nbits, int delay);
   static std::string pipe_delay_wire(std::string name, std::string name_delayed, int nbits, int delay);
+
+#ifdef IMATH_ROOT
+  static TFile* h_file_;
+  static bool use_root;
+  static TTree* AddToTree(var_base* v, char* s=0);
+  static TTree* AddToTree(int* v, char*s);
+  static TTree* AddToTree(double* v, char *s);
+  static void FillTree();
+  static void WriteTree();
+#endif
   
   void        dump_cout();
   std::string dump();
@@ -229,7 +241,6 @@ class var_base {
   }
   int    h_nbins_;
   double  h_precision_;
-  static TFile* h_file_;
   TH2F *h_;
 #endif
   
@@ -299,7 +310,7 @@ class var_param : public var_base {
   
   void    set_fval(double fval){
     fval_ = fval;
-    ival_ = fval / K_;
+    ival_ = fval / K_+0.5;
   }
   void    set_ival(int ival){
     ival_ = ival;
@@ -339,7 +350,7 @@ class var_def : public var_base {
   }
   void    set_fval(double fval){
     fval_ = fval;
-    ival_ = fval / K_;
+    ival_ = fval / K_ + 0.5;
   }
   void    set_ival(int ival){
     ival_ = ival;
@@ -808,14 +819,10 @@ class var_inv : public var_base {
     K_ = pow(2,-n)/p1->get_K();
 
     LUT = new int[Nelements_];
-    unsigned int ms = sizeof(int)*8-nbits_;
-    int offsetI = offset_ / p1_->get_K();
+    double offsetI = round_int(offset_ / p1_->get_K());
     for(int i=0; i<Nelements_; ++i){
       int i1 = addr_to_ival(i);
-      if(offsetI+i1)
-	LUT[i] = (round_int((1<<n_)/(offsetI+i1))<<ms)>>ms;
-      else
-	LUT[i] = 0;
+      LUT[i] = gen_inv(offsetI+i1);
     }
   }
   ~var_inv(){
@@ -823,13 +830,17 @@ class var_inv : public var_base {
   }
 
   void set_mode(mode m){ m_ = m;}
-  void initLUT(double offset);  
+  void initLUT(double offset);
+  double  get_offset(){return offset_;} 
+  double  get_Ioffset(){return offset_/p1_->get_K();} 
   
   void local_calculate();
   void print(std::ofstream& fs, int l1=0, int l2 = 0, int l3 = 0);
   void writeLUT(std::ofstream& fs);
 
-  int ival_to_addr(int ival){ return ((ival>>shift_)&mask_);}
+  int ival_to_addr(int ival){
+    return (((ival+(1<<(shift_-1)))>>shift_)&mask_);
+  }
   int addr_to_ival(int addr){
     switch(m_){
     case mode::pos  :  return addr<<shift_;
@@ -837,9 +848,26 @@ class var_inv : public var_base {
     case mode::both :  return (addr<<ashift_)>>(ashift_-shift_);
     }
   }
+  int gen_inv(int i){
+    unsigned int ms = sizeof(int)*8-nbits_;
+    int lut = 0;
+    if(i>0){
+      int lut1 = (round_int((1<<n_)/i)<<ms)>>ms;
+      int lut2 = (round_int((1<<n_)/(i+1))<<ms)>>ms;
+      lut = 0.5*(lut1+lut2);
+    }
+    else if(i<0){
+      int lut1 = (round_int((1<<n_)/i)<<ms)>>ms;
+      int lut2 = (round_int((1<<n_)/(i-1))<<ms)>>ms;
+      lut = 0.5*(lut1+lut2);
+    }
+    return lut;
+  }
 
+  
   int round_int( double r ) {
-    return (r > 0.0) ? (r + 0.5) : (r - 0.5); 
+    return (r > 0.0) ? (r + 0.5) : ( r - 0.5);
+    //return r;
   }
 
  protected:

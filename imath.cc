@@ -55,7 +55,7 @@ void var_base::analyze()
     h_->Write();
   }
   else{
-    printf("analyzing %s: no histogram!\n",name_.c_str());
+    if(use_root) printf("analyzing %s: no histogram!\n",name_.c_str());
   }
 #endif
 
@@ -99,24 +99,27 @@ bool var_base::calculate(int debug_level)
   long int ival_prev = ival_;
   local_calculate();
 
-  bool all_ok = ok1 && ok2 && ok3;
+  bool all_ok = ok1 && ok2 && ok3 && debug_level;
 
   if(fval_ > maxval_) maxval_ = fval_;
   if(fval_ < minval_) minval_ = fval_;
 #ifdef IMATH_ROOT
-  if(h_==0){
-    h_file_->cd();
-    std::string hname = "h_"+name_;
-    h_ = (TH2F*) h_file_->Get(hname.c_str());
-    if(h_ == 0){
-      std::string st = name_+";fval;fval-ival*K";
-      h_ = new TH2F(hname.c_str(),name_.c_str(),
-		    h_nbins_,-get_range(), get_range(),
-		    h_nbins_,-get_range()*h_precision_, get_range()*h_precision_);
-      if(debug_level==3) std::cout<<" booking histogram "<<hname<<"\n";
+  if(use_root){
+    if(h_==0){
+      h_file_->cd();
+      std::string hname = "h_"+name_;
+      h_ = (TH2F*) h_file_->Get(hname.c_str());
+      if(h_ == 0){
+	h_precision_ = 0.5*h_nbins_*K_;
+	std::string st = name_+";fval;fval-ival*K";
+	h_ = new TH2F(hname.c_str(),name_.c_str(),
+		      h_nbins_,-get_range(), get_range(),
+		      h_nbins_,-h_precision_, h_precision_);
+	if(debug_level==3) std::cout<<" booking histogram "<<hname<<"\n";
+      }
     }
+    if(ival_ != ival_prev || op_=="def" || op_=="const") h_->Fill(fval_, K_*ival_-fval_);
   }
-  if(ival_ != ival_prev || op_=="def" || op_=="const") h_->Fill(fval_, K_*ival_-fval_);
 #endif
 
   bool todump = false;
@@ -126,7 +129,7 @@ bool var_base::calculate(int debug_level)
   itest = itest<<ns;
   itest = itest>>ns;
   if(itest!=ival_){
-    if(ival_!=ival_prev && (debug_level == 3 || all_ok)){
+    if(debug_level == 3 || (ival_!=ival_prev && all_ok)){
       std::cout<<"imath: truncated value mismatch!! "<<ival_<<" != "<<itest<<"\n";
       todump = true;
     }
@@ -137,8 +140,9 @@ bool var_base::calculate(int debug_level)
   float tolerance = 0.1 * fabs(fval_);
   if(tolerance < 2 * K_) tolerance = 2 * K_;
   if(fabs(ftest-fval_)> tolerance){
-    if(ival_!=ival_prev && (debug_level == 3 || (all_ok && (op_!="inv" ||debug_level>=2 )))){
+    if( debug_level == 3 || (ival_!=ival_prev &&(all_ok && (op_!="inv" ||debug_level>=2 )))){
       std::cout<<"imath: **GROSS** value mismatch!! "<<fval_<<" != "<<ftest<<"\n";
+      if(op_=="inv") std::cout<<p1_->dump()<<"\n-----------------------------------\n";
       todump = true;
     }
     all_ok = false;
@@ -254,14 +258,10 @@ void var_DSP_postadd::local_calculate()
 void var_inv::initLUT(double offset)
 {
   offset_ = offset;
-  unsigned int ms = sizeof(int)*8-nbits_;
-  int offsetI = round_int(offset_ / p1_->get_K());
+  double offsetI = round_int(offset_ / p1_->get_K());
   for(int i=0; i<Nelements_; ++i){
     int i1 = addr_to_ival(i);
-    if(offsetI+i1)
-      LUT[i] = (round_int((1<<n_)/(offsetI+i1))<<ms)>>ms;
-    else
-      LUT[i] = 0;
+    LUT[i] = gen_inv(offsetI+i1);
   }
 }
 void var_inv::local_calculate()
@@ -367,6 +367,87 @@ void var_base::get_inputs(std::vector<var_base*> *vd)
   }
 }
 
+#ifdef IMATH_ROOT
+TTree* var_base::AddToTree(var_base* v, char *s)
+{
+  if(h_file_==0){
+    h_file_ = new TFile("imath.root","RECREATE");
+    printf("recreating file imath.root\n");
+  }
+  h_file_->cd();
+  TTree *tt = (TTree*) h_file_->Get("tt");
+  if(tt==0){
+    tt = new TTree("tt","");
+    printf("creating TTree tt\n");
+  }
+  std::string si = v->get_name()+"_i";
+  std::string sf = v->get_name()+"_f";
+  if(s!=0){
+    std::string prefix(s);
+    si = prefix + si;
+    sf = prefix + sf;
+  }
+  if(!tt->GetBranchStatus(si.c_str())){
+    tt->Branch(si.c_str(),(Long64_t*) &(v->ival_));
+    tt->Branch(sf.c_str(),&(v->fval_));
+  }
+
+  if(v->p1_) AddToTree(v->p1_, s);
+  if(v->p2_) AddToTree(v->p2_, s);
+  if(v->p3_) AddToTree(v->p3_, s);
+  
+  return tt;
+}
+TTree* var_base::AddToTree(double* v, char *s)
+{
+  if(h_file_==0){
+    h_file_ = new TFile("imath.root","RECREATE");
+    printf("recreating file imath.root\n");
+  }
+  h_file_->cd();
+  TTree *tt = (TTree*) h_file_->Get("tt");
+  if(tt==0){
+    tt = new TTree("tt","");
+    printf("creating TTree tt\n");
+  }
+  tt->Branch(s,v);
+  return tt;
+}
+TTree* var_base::AddToTree(int* v, char *s)
+{
+  if(h_file_==0){
+    h_file_ = new TFile("imath.root","RECREATE");
+    printf("recreating file imath.root\n");
+  }
+  h_file_->cd();
+  TTree *tt = (TTree*) h_file_->Get("tt");
+  if(tt==0){
+    tt = new TTree("tt","");
+    printf("creating TTree tt\n");
+  }
+  tt->Branch(s,v);
+  return tt;
+}
+void var_base::FillTree()
+{
+  if(h_file_==0) return;
+  h_file_->cd();
+  TTree *tt = (TTree*) h_file_->Get("tt");
+  if(tt==0) return;
+  tt->Fill();
+}
+void var_base::WriteTree()
+{
+  if(h_file_==0) return;
+  h_file_->cd();
+  TTree *tt = (TTree*) h_file_->Get("tt");
+  if(tt==0) return;
+  tt->Write();
+}
+  
+#endif
+
+
 void var_base::Verilog_print(std::vector<var_base*> v, std::ofstream& fs)
 {
 
@@ -447,7 +528,7 @@ void var_adjustK::print(std::ofstream& fs, int l1, int l2, int l3)
 
   fs<<"// "<<nbits_ <<" bits \t "<<get_kstring()<<"\t"<<K_<<"\n"; 
   std::string t = "wire signed ["+itos(nbits_-1)+":0]"+name_+";\n";
-  t += "assign "+name_+" = "+n1;
+  t += "assign "+name_+" = "+n1+shift;
   fs<<t<<"; \n";
   
 }
